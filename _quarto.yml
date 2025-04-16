@@ -1,0 +1,28 @@
+project:
+  type: website
+
+website:
+  title: "Tableau de bord des méta-analyses"
+  navbar:
+    background: primary
+    search: true
+    right:
+      - icon: github
+        href: https://github.com/assiacmyk
+      - icon: moon-stars # pour le dark mode
+        href: "#"
+  page-navigation: true
+
+format:
+  html:
+    theme:
+      light: cosmo
+      dark: darkly
+    css: styles.css
+    toc: false
+    code-fold: true
+    code-tools: true
+    execute:
+      warning: false
+      message: false
+      toc-title: ""

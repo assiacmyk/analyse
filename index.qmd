@@ -1,0 +1,418 @@
+---
+
+---
+
+---
+title: "Meta-Analyses de Donnees Cochrane"
+author: "Assia Aouimeur"
+date: "2025-04-14"
+format:
+  html:
+    toc: true
+    toc-title: ""
+    code-fold: true
+    theme:
+      light: flatly
+      dark: darkly
+    css: styles.css
+---
+
+::: {.hero .center style="background-color:#3498db; color:white; padding:4em 2em; text-align:center; border-radius:10px;"}
+# **Meta-Analyses de Données Cliniques**
+
+### **Exploration de résultats issus de la base Cochrane**
+
+#### Analyse comparative, reproductibilité et visualisation des effets globaux
+:::
+
+## Sommaire
+
+::: toc-style
+-   [Introduction](#introduction)
+-   [Chargement des librairies / packages et des données](#chargement-des-librairies--packages-et-des-donnees)
+-   [Sélection des méta-analyses avec RR ou OR](#sélection-des-méta-analyses-avec-rr-ou-or)
+-   [Reproduction de 10 méta-analyses avec metagen](#reproduction-de-10-méta-analyses-avec-metagen)
+-   [Comparaison graphique des résultats reproduits](#comparaison-graphique-des-résultats-reproduits)
+-   [Conclusion](#conclusion)
+:::
+
+## Introduction
+
+*Ce site présente la reproduction et l'analyse de méta-analyses à partir de données cliniques issues de la base Cochrane. L'objectif est d'évaluer la reproductibilité des effets globaux, d'explorer l'hétérogénéité et de comparer les intervalles de confiance obtenus par différentes méthodes.*
+
+> Tous les résultats, codes et graphiques sont accessibles, interactifs, et enrichis par un sommaire dynamique.
+
+------------------------------------------------------------------------
+
+# Chargement des librairies / packages et des données
+
+```{r packages}
+
+
+#install.packages('meta')
+#install.packages('metafor')
+#install.packages('tidyverse')
+
+```
+
+```{r librairie}
+library(meta)
+library(metafor)
+library(tidyverse)
+```
+
+```{r telechargement}
+
+overall <- read.csv("C:/Users/Aouimeur/Downloads/overall-estimates-and-settings.csv")
+data_rows <- read.csv("C:/Users/Aouimeur/Downloads/data-rows.csv")
+
+
+```
+
+```{r nom}
+colnames(overall)
+
+```
+
+# Sélection des méta-analyses avec RR ou OR
+
+```{r Filtrage des méta-analyses RR / OR}
+
+library(dplyr)
+overall_filtered <- overall %>%
+  filter(Effect.measure %in% c("Risk Ratio", "Odds Ratio"))
+
+
+head(overall_filtered, 5)
+
+# nbr total de méta-analyses gardées
+
+nrow(overall_filtered)
+
+
+```
+
+**nbr totale 10869**
+
+# Reproduction de 10 méta-analyses avec `metagen`
+
+```{r comparaison multiple}
+comparaisons <- tibble() 
+
+# Si on souhaites appliquer la boucle sur toutes les méta-analyses
+# on remplace la ligne par 
+# meta_extraits <- overall_filtered
+
+meta_extraits <- overall_filtered %>% slice(1:10)
+
+#(test sur petit echantillon)
+
+for (i in 1:nrow(meta_extraits)) {
+  meta <- meta_extraits[i, ]
+  
+  cochrane_id <- meta$cochrane_IDs
+  group <- meta$Analysis.group
+  number <- meta$Analysis.number
+
+  etudes <- data_rows %>%
+    filter(cochrane_IDs == cochrane_id,
+           Analysis.group == group,
+           Analysis.number == number)
+
+  if (nrow(etudes) > 1 && all(!is.na(etudes$Mean))) {
+    etudes <- etudes %>%
+      mutate(
+        Mean_log = log(Mean),
+        CI_start_log = log(CI.start),
+        CI_end_log = log(CI.end)
+      )
+
+    effet <- ifelse(meta$Effect.measure == "Risk Ratio", "RR", "OR")
+    modele <- ifelse(meta$Analysis.model == "Random effects", TRUE, FALSE)
+
+    res <- tryCatch({
+      metagen(
+        TE = etudes$Mean_log,
+        lower = etudes$CI_start_log,
+        upper = etudes$CI_end_log,
+        studlab = etudes$Study,
+        sm = effet,
+        method.tau = "DL",
+        random = modele,
+        log = TRUE
+      )
+    }, error = function(e) NULL)
+
+    if (!is.null(res)) {
+      comparaison <- tibble(
+        MetaID = i,
+        Mean_original = log(meta$Mean),
+        Mean_reproduit = res$TE.random[1],
+        CI_lower_original = log(meta$CI.start),
+        CI_lower_reproduit = res$lower.random[1],
+        CI_upper_original = log(meta$CI.end),
+        CI_upper_reproduit = res$upper.random[1],
+        Tau2_original = meta$Heterogeneity.Tau.,
+        Tau2_reproduit = res$tau2,
+        I2_original = meta$Heterogeneity.I.,
+        I2_reproduit = res$I2
+      )
+      comparaisons <- bind_rows(comparaisons, comparaison)
+    }
+  }
+}
+
+
+head(comparaisons)
+```
+
+```{r selection}
+library(tidyverse)
+
+meta1 <- overall_filtered %>% slice(1)
+
+# 2. Extraction des idd
+cochrane_id <- meta1$cochrane_IDs
+analysis_group <- meta1$Analysis.group
+analysis_number <- meta1$Analysis.number
+
+# 3. Filtrer les études associées dans data_rows
+etudes_meta1 <- data_rows %>%
+  filter(cochrane_IDs == cochrane_id,
+         Analysis.group == analysis_group,
+         Analysis.number == analysis_number)
+
+
+head(etudes_meta1, 6)
+
+colnames(etudes_meta1)
+```
+
+```{r metanalyse1}
+
+library(meta)
+
+# Définir les paramètres
+effet <- ifelse(meta1$Effect.measure == "Risk Ratio", "RR", "OR")
+modele <- ifelse(meta1$Analysis.model == "Random effects", TRUE, FALSE)
+methode <- tolower(meta1$Statistical.method)
+
+# Lancer la méta-analyse avec metabin()
+resultat_bin <- metabin(
+  event.e = etudes_meta1$Experimental.cases,
+  n.e = etudes_meta1$Experimental.N,
+  event.c = etudes_meta1$Control.cases,
+  n.c = etudes_meta1$Control.N,
+  studlab = etudes_meta1$Study,
+  sm = effet,
+  method = methode,
+  random = modele
+)
+
+# Afficher les résultats
+print(resultat_bin)
+
+
+
+```
+
+**les patients exposé ont 1.6 fois plus de chances d’avoir l’événement que ceux du groupe contrôle.**
+
+```{r meta2}
+# avec metagen
+resultat_gen <- metagen(
+  TE = etudes_meta1$Mean,
+  lower = etudes_meta1$CI.start,
+  upper = etudes_meta1$CI.end,
+  studlab = etudes_meta1$Study,
+  sm = effet,
+  method.tau = "DL",
+  random = modele,
+  log = TRUE  
+)
+
+print(resultat_gen)
+
+```
+
+**Le groupe exposé a 4 fois plus de risques que le groupe contrôle**
+
+```{r verification}
+etudes_meta1 <- etudes_meta1 %>%
+  mutate(
+    Mean_log = log(Mean),
+    CI_start_log = log(CI.start),
+    CI_end_log = log(CI.end)
+  )
+
+resultat_gen <- metagen(
+  TE = etudes_meta1$Mean_log,
+  lower = etudes_meta1$CI_start_log,
+  upper = etudes_meta1$CI_end_log,
+  studlab = etudes_meta1$Study,
+  sm = effet,
+  method.tau = "DL",
+  random = modele,
+  log = TRUE
+)
+
+
+print(resultat_gen)
+
+
+
+
+```
+
+**Le groupe exposé a 56% plus de risque d’avoir l’événement par rapport au groupe contrôle**
+
+**estimation de variation faible**
+
+```{r comparaison metabin metagen}
+comparaison <- tibble::tibble(
+  Méthode = c("metabin", "metagen"),
+  Effet_global = c(resultat_bin$TE.random[1], resultat_gen$TE.random[1]),
+  IC_basse     = c(resultat_bin$lower.random[1], resultat_gen$lower.random[1]),
+  IC_haute     = c(resultat_bin$upper.random[1], resultat_gen$upper.random[1]),
+  p_value      = c(resultat_bin$pval.random[1], resultat_gen$pval[1])
+)
+
+print(comparaison)
+
+```
+
+```{r heterogeneite}
+cat("I2 metabin :", resultat_bin$I2, "\n")
+cat("I2 metagen :", resultat_gen$I2, "\n")
+
+cat("Tau2 metabin :", resultat_bin$tau2, "\n")
+cat("Tau2 metagen :", resultat_gen$tau2, "\n")
+
+```
+
+```{r plot}
+forest(resultat_gen, sortvar = TE, comb.fixed = FALSE)
+
+```
+
+```{r Transformation}
+meta1_log <- meta1 %>%
+  mutate(
+    Mean_log = log(Mean),
+    CI_start_log = log(CI.start),
+    CI_end_log = log(CI.end)
+  )
+
+```
+
+```{r metagen vs meta1}
+
+# Comparaison des résultats obtenus metagen vs meta1
+comparaison_resultats <- tibble::tibble(
+  Variable = c(
+    "Effet global (Mean)",
+    "IC 95% - Borne inférieure",
+    "IC 95% - Borne supérieure",
+    "Tau² (Hétérogénéité)",
+    "I² (Hétérogénéité)",
+    "p-value de l’effet",
+    "Z-score"
+  ),
+  Resultat_meta = c(
+    resultat_gen$TE.random[1],       # effet estimé (log)
+    resultat_gen$lower.random[1],    # borne inférieure
+    resultat_gen$upper.random[1],    # borne supérieure
+    resultat_gen$tau2,               # tau² (variance inter-études)
+    resultat_gen$I2,                 # I² (hétérogénéité)
+    resultat_gen$pval.random[1],     # p-value
+    resultat_gen$zval.random[1]      # Z-score
+  ),
+  Resultat_officiel = c(
+    meta1_log$Mean_log,              # Mean log-transformé
+    meta1_log$CI_start_log,          # IC start log
+    meta1_log$CI_end_log,            # IC end log
+    meta1$Heterogeneity.Tau.,        # tau² officiel
+    meta1$Heterogeneity.I.,          # I² officiel
+    meta1$Effect.P,                  # p-value officielle
+    meta1$Effect.Z                   # Z-score officiel
+  )
+)
+
+
+print(comparaison_resultats)
+
+```
+
+**On peut remarquer que la reproduction de la meta-analyse concorde avec celle de la base oficielle**
+
+## Comparaison graphique des résultats reproduits
+
+Les figures suivantes comparent les résultats extraits de la base officielle aux résultats que nous avons reproduits pour 10 méta-analyses (via `metagen`).\
+Chaque point représente une méta-analyse.\
+- L’axe **X** contient la valeur originale (officielle), - L’axe **Y** contient la valeur reproduite. - La ligne pointillée représente une **égalité parfaite**
+
+```{r Effet global}
+
+library(ggplot2)
+
+
+ggplot(comparaisons, aes(x = Mean_original, y = Mean_reproduit)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "plum") +
+  labs(
+    title = "Comparaison de l'effet global (Mean)",
+    x = "Valeur originale (log)",
+    y = "Valeur reproduite (log)"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r Borne inferieure IC 95}
+
+
+ggplot(comparaisons, aes(x = CI_lower_original, y = CI_lower_reproduit)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "cyan4") +
+  labs(
+    title = "Comparaison borne inférieure IC 95%",
+    x = "Valeur originale (log)",
+    y = "Valeur reproduite (log)"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r Borne superieure IC 95}
+
+ggplot(comparaisons, aes(x = CI_upper_original, y = CI_upper_reproduit)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "darkorchid") +
+  labs(
+    title = "Comparaison borne supérieure IC 95%",
+    x = "Valeur originale (log)",
+    y = "Valeur reproduite (log)"
+  ) +
+  theme_minimal()
+
+
+```
+
+```{r hétérogénéité}
+
+ggplot(comparaisons, aes(x = I2_original, y = I2_reproduit)) +
+  geom_point() +
+  geom_abline(slope = 1, intercept = 0, linetype = "dashed", color = "deepskyblue4") +
+  labs(
+    title = "Comparaison de I² (hétérogénéité)",
+    x = "I² original",
+    y = "I² reproduit"
+  ) +
+  theme_minimal()
+```
+
+## Conclusion
+
+La reproduction automatique de plusieurs méta-analyses à partir des données Cochrane a montré une bonne concordance sur les principaux indicateurs (effet global, intervalles de confiance, hétérogénéité).
